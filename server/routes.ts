@@ -16,7 +16,7 @@ import bcrypt from "bcrypt";
 import { z } from "zod";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
-import { getUncachableStripeClient } from "./stripeClient";
+import { getUncachableStripeClient, getCurrentStripeEnvironment } from "./stripeClient";
 import { emailService } from "./emailService";
 
 // Helper to generate unique reference numbers
@@ -1115,6 +1115,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Public endpoint for Stripe environment (sandbox vs live)
+  app.get("/api/settings/stripe-environment", async (req: Request, res: Response) => {
+    const env = await getCurrentStripeEnvironment();
+    res.json({ environment: env });
+  });
+
+  // Admin endpoint to update Stripe environment
+  app.post("/api/admin/settings/stripe-environment", requireAdmin, async (req: Request, res: Response) => {
+    const { environment } = req.body;
+    if (environment !== "sandbox" && environment !== "live") {
+      return res.status(400).json({ message: "Environment must be 'sandbox' or 'live'" });
+    }
+    await storage.upsertSetting({
+      key: "stripe_environment",
+      value: environment,
+      description: "Stripe environment: sandbox for testing, live for real payments",
+    });
+    res.json({ environment });
+  });
+
   // Public endpoint to get booking by Stripe session ID (for confirmation page)
   app.get("/api/booking-confirmation/:sessionId", async (req: Request, res: Response) => {
     try {
@@ -1334,6 +1354,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         key: "tax_percentage",
         value: "0",
         description: "Tax percentage applied to all bookings",
+      });
+    }
+
+    const stripeEnv = await storage.getSetting("stripe_environment");
+    if (!stripeEnv) {
+      await storage.upsertSetting({
+        key: "stripe_environment",
+        value: "sandbox",
+        description: "Stripe environment: sandbox for testing, live for real payments",
       });
     }
   };

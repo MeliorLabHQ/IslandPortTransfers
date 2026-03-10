@@ -11,9 +11,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Settings, Users, DollarSign, Percent } from "lucide-react";
+import { Settings, Users, DollarSign, Percent, CreditCard, FlaskConical, Zap } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
 
 interface LargePartySurcharge {
   amount: string;
@@ -22,6 +23,10 @@ interface LargePartySurcharge {
 
 interface TaxSettings {
   percentage: string;
+}
+
+interface StripeEnvironmentSettings {
+  environment: "sandbox" | "live";
 }
 
 export default function AdminSettings() {
@@ -36,6 +41,10 @@ export default function AdminSettings() {
 
   const { data: taxSettings, isLoading: taxLoading } = useQuery<TaxSettings>({
     queryKey: ["/api/settings/tax"],
+  });
+
+  const { data: stripeEnvSettings, isLoading: stripeEnvLoading } = useQuery<StripeEnvironmentSettings>({
+    queryKey: ["/api/settings/stripe-environment"],
   });
 
   useEffect(() => {
@@ -119,6 +128,24 @@ export default function AdminSettings() {
     
     saveTaxMutation.mutate();
   };
+
+  const switchStripeEnvMutation = useMutation({
+    mutationFn: async (environment: "sandbox" | "live") => {
+      return await apiRequest("POST", "/api/admin/settings/stripe-environment", { environment });
+    },
+    onSuccess: (_data, environment) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/stripe-environment"] });
+      toast({
+        title: `Stripe switched to ${environment === "live" ? "Live" : "Sandbox"}`,
+        description: environment === "live"
+          ? "Real payments will now be processed."
+          : "Test payments will now be processed using sandbox keys.",
+      });
+    },
+    onError: () => {
+      toast({ title: "Failed to switch Stripe environment", variant: "destructive" });
+    },
+  });
 
   return (
     <AdminLayout>
@@ -264,6 +291,69 @@ export default function AdminSettings() {
                   {saveTaxMutation.isPending ? "Saving..." : "Save Tax Settings"}
                 </Button>
               </form>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CreditCard className="w-5 h-5" />
+              Stripe Environment
+            </CardTitle>
+            <CardDescription>
+              Switch between sandbox (testing) and live (real payments) Stripe keys
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {stripeEnvLoading ? (
+              <div className="text-center py-4 text-muted-foreground">Loading...</div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium">Current environment:</span>
+                  {stripeEnvSettings?.environment === "live" ? (
+                    <Badge data-testid="badge-stripe-environment" className="bg-green-600 text-white no-default-active-elevate">
+                      <Zap className="w-3 h-3 mr-1" />
+                      Live
+                    </Badge>
+                  ) : (
+                    <Badge data-testid="badge-stripe-environment" variant="secondary">
+                      <FlaskConical className="w-3 h-3 mr-1" />
+                      Sandbox
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="bg-muted/50 rounded-md p-4 space-y-1">
+                  <p className="text-sm">
+                    <strong>Sandbox:</strong> Uses test keys. No real money is charged. Use for development and staging.
+                  </p>
+                  <p className="text-sm">
+                    <strong>Live:</strong> Uses live keys. Real payments are processed. Use for production only.
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button
+                    variant={stripeEnvSettings?.environment === "sandbox" ? "default" : "outline"}
+                    onClick={() => switchStripeEnvMutation.mutate("sandbox")}
+                    disabled={switchStripeEnvMutation.isPending || stripeEnvSettings?.environment === "sandbox"}
+                    data-testid="button-stripe-sandbox"
+                  >
+                    <FlaskConical className="w-4 h-4 mr-2" />
+                    Use Sandbox
+                  </Button>
+                  <Button
+                    variant={stripeEnvSettings?.environment === "live" ? "default" : "outline"}
+                    onClick={() => switchStripeEnvMutation.mutate("live")}
+                    disabled={switchStripeEnvMutation.isPending || stripeEnvSettings?.environment === "live"}
+                    data-testid="button-stripe-live"
+                  >
+                    <Zap className="w-4 h-4 mr-2" />
+                    Use Live
+                  </Button>
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>
