@@ -29,7 +29,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
-import heroImage from "@assets/generated_images/Airport_professional_greeting_scene_d42210f5.png";
+import heroImage from "@assets/30189_1773942664009.jpg";
 import type { Hotel, Port } from "@shared/schema";
 
 export default function HeroSection() {
