@@ -27,33 +27,37 @@ declare module "express-session" {
  *   3. Subdomain of host (production: sandals.islandporttransfers.com -> "sandals")
  *   4. Default property (fallback)
  */
-export async function resolveProperty(req: Request): Promise<Property | undefined> {
+export async function resolveProperty(req: Request): Promise<{ property?: Property; explicitMiss?: boolean }> {
   const fromQuery = typeof req.query.property === "string" ? req.query.property : undefined;
   const fromHeader = req.header("x-property-slug") || undefined;
+  const explicit = fromQuery || fromHeader;
 
-  let slug = fromQuery || fromHeader;
+  let slug = explicit;
+  let isExplicit = !!explicit;
 
   if (!slug) {
     const host = req.hostname || "";
-    // Strip port if present
     const hostname = host.split(":")[0];
     const parts = hostname.split(".");
-    // Look for *.islandporttransfers.com style subdomains (3+ parts), excluding common reserved
     const RESERVED = new Set(["www", "api", "admin", "app", "marketing"]);
     if (parts.length >= 3) {
       const candidate = parts[0].toLowerCase();
       if (!RESERVED.has(candidate)) {
         slug = candidate;
+        isExplicit = true;
       }
     }
   }
 
   if (slug) {
     const found = await storage.getPropertyBySlug(slug);
-    if (found && found.status === "active") return found;
+    if (found && found.status === "active") return { property: found };
+    // Explicit selector but property is missing or not active → fail closed
+    if (isExplicit) return { explicitMiss: true };
   }
 
-  return await storage.getDefaultProperty();
+  const def = await storage.getDefaultProperty();
+  return { property: def };
 }
 
 /**
@@ -62,7 +66,10 @@ export async function resolveProperty(req: Request): Promise<Property | undefine
  */
 export async function attachProperty(req: Request, res: Response, next: NextFunction) {
   try {
-    const property = await resolveProperty(req);
+    const { property, explicitMiss } = await resolveProperty(req);
+    if (explicitMiss) {
+      return res.status(404).json({ error: "Property not found or not active" });
+    }
     if (!property) {
       return res.status(503).json({ error: "No property configured" });
     }

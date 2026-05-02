@@ -15,6 +15,19 @@ interface BaseBookingEmail {
 }
 
 export class EmailService {
+  async sendRawEmail(opts: { propertyId: string; to: string; subject: string; html: string }) {
+    const { client, fromEmail } = await getUncachableResendClient();
+    const property = await storage.getProperty(opts.propertyId);
+    const senderName = property?.name || 'Island Port Transfers';
+    const from = fromEmail.includes('<') ? fromEmail : `${senderName} <${fromEmail}>`;
+    const { data, error } = await client.emails.send({ from, to: opts.to, subject: opts.subject, html: opts.html });
+    if (error) {
+      console.error('Failed to send raw email:', error);
+      throw error;
+    }
+    return data;
+  }
+
   private async send(opts: { propertyId: string; to: string; templateKey: string; variables: Record<string, string | number>; fallbackSubject: string; fallbackHtml: string }) {
     const { client, fromEmail } = await getUncachableResendClient();
     const property = await storage.getProperty(opts.propertyId);

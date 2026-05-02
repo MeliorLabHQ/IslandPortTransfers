@@ -52,6 +52,7 @@ export interface IStorage {
   getPropertyBySlug(slug: string): Promise<Property | undefined>;
   getDefaultProperty(): Promise<Property | undefined>;
   createProperty(p: InsertProperty): Promise<Property>;
+  createPropertyWithOwner(args: { property: InsertProperty; owner: Omit<InsertAdminUser, "propertyId"> }): Promise<Property>;
   updateProperty(id: string, p: Partial<InsertProperty>): Promise<Property | undefined>;
   deleteProperty(id: string): Promise<boolean>;
 
@@ -59,6 +60,7 @@ export interface IStorage {
   getSuperAdmin(id: string): Promise<SuperAdminUser | undefined>;
   getSuperAdminByEmail(email: string): Promise<SuperAdminUser | undefined>;
   createSuperAdmin(u: InsertSuperAdminUser): Promise<SuperAdminUser>;
+  getAllSuperAdmins(): Promise<SuperAdminUser[]>;
 
   // Property users (admin_users)
   getAllAdminUsers(propertyId: string): Promise<AdminUser[]>;
@@ -178,6 +180,13 @@ export class DbStorage implements IStorage {
     const r = await db.insert(properties).values(p).returning();
     return r[0];
   }
+  async createPropertyWithOwner(args: { property: InsertProperty; owner: Omit<InsertAdminUser, "propertyId"> }): Promise<Property> {
+    return await db.transaction(async (tx) => {
+      const [prop] = await tx.insert(properties).values(args.property).returning();
+      await tx.insert(adminUsers).values({ ...args.owner, propertyId: prop.id });
+      return prop;
+    });
+  }
   async updateProperty(id: string, p: Partial<InsertProperty>): Promise<Property | undefined> {
     const r = await db.update(properties).set(p).where(eq(properties.id, id)).returning();
     return r[0];
@@ -199,6 +208,9 @@ export class DbStorage implements IStorage {
   async createSuperAdmin(u: InsertSuperAdminUser): Promise<SuperAdminUser> {
     const r = await db.insert(superAdminUsers).values(u).returning();
     return r[0];
+  }
+  async getAllSuperAdmins(): Promise<SuperAdminUser[]> {
+    return await db.select().from(superAdminUsers).orderBy(desc(superAdminUsers.createdAt));
   }
 
   // ========== Property users (admin_users) ==========

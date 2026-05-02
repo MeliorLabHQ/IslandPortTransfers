@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { LogOut, Plus, ExternalLink } from "lucide-react";
+import { LogOut, Plus, ExternalLink, Check, X, Clock } from "lucide-react";
 
 interface Property {
   id: string;
@@ -57,6 +57,24 @@ export default function SuperAdminDashboard() {
       try { const r = await err?.response?.json?.(); if (r?.error) msg = r.error; } catch {}
       toast({ title: "Error", description: msg, variant: "destructive" });
     },
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: async (id: string) => apiRequest("POST", `/api/super-admin/properties/${id}/approve`),
+    onSuccess: () => {
+      toast({ title: "Property approved", description: "Owner has been notified by email." });
+      queryClient.invalidateQueries({ queryKey: ["/api/super-admin/properties"] });
+    },
+    onError: () => toast({ title: "Approval failed", variant: "destructive" }),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async (id: string) => apiRequest("POST", `/api/super-admin/properties/${id}/reject`),
+    onSuccess: () => {
+      toast({ title: "Signup rejected", description: "Property has been removed." });
+      queryClient.invalidateQueries({ queryKey: ["/api/super-admin/properties"] });
+    },
+    onError: () => toast({ title: "Rejection failed", variant: "destructive" }),
   });
 
   const logoutMutation = useMutation({
@@ -136,9 +154,20 @@ export default function SuperAdminDashboard() {
             {properties?.map((p) => (
               <Card key={p.id} data-testid={`card-property-${p.id}`}>
                 <CardHeader>
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start justify-between gap-2 flex-wrap">
                     <CardTitle className="text-lg">{p.name}</CardTitle>
-                    {p.isDefault && <Badge variant="secondary">Default</Badge>}
+                    <div className="flex gap-1 flex-wrap">
+                      {p.isDefault && <Badge variant="secondary">Default</Badge>}
+                      {p.status === "pending" && (
+                        <Badge variant="outline" className="border-amber-500 text-amber-700 dark:text-amber-400" data-testid={`badge-pending-${p.id}`}>
+                          <Clock className="w-3 h-3 mr-1" /> Pending
+                        </Badge>
+                      )}
+                      {p.status === "active" && !p.isDefault && (
+                        <Badge variant="outline" className="border-green-600 text-green-700 dark:text-green-400">Active</Badge>
+                      )}
+                      {p.status === "suspended" && <Badge variant="destructive">Suspended</Badge>}
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2">
@@ -150,9 +179,35 @@ export default function SuperAdminDashboard() {
                   <div className="text-xs text-muted-foreground">
                     Slug: <code>{p.slug}</code>
                   </div>
-                  <a href={`/?property=${p.slug}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline" data-testid={`link-preview-${p.id}`}>
-                    Preview booking page <ExternalLink className="w-3 h-3" />
-                  </a>
+                  {p.status === "pending" ? (
+                    <div className="flex gap-2 pt-2">
+                      <Button
+                        size="sm"
+                        onClick={() => approveMutation.mutate(p.id)}
+                        disabled={approveMutation.isPending}
+                        data-testid={`button-approve-${p.id}`}
+                      >
+                        <Check className="w-3 h-3 mr-1" /> Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (confirm(`Reject and remove "${p.name}"? This cannot be undone.`)) {
+                            rejectMutation.mutate(p.id);
+                          }
+                        }}
+                        disabled={rejectMutation.isPending}
+                        data-testid={`button-reject-${p.id}`}
+                      >
+                        <X className="w-3 h-3 mr-1" /> Reject
+                      </Button>
+                    </div>
+                  ) : (
+                    <a href={`/?property=${p.slug}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline" data-testid={`link-preview-${p.id}`}>
+                      Preview booking page <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
                 </CardContent>
               </Card>
             ))}

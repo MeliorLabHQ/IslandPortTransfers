@@ -114,6 +114,162 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true });
   });
 
+  // Approve a pending signup -> activates property + emails owner
+  app.post("/api/super-admin/properties/:id/approve", requireSuperAdmin, async (req, res) => {
+    const existing = await storage.getProperty(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    if (existing.status !== "pending") {
+      return res.status(400).json({ error: "Only pending properties can be approved" });
+    }
+    const property = await storage.updateProperty(req.params.id, { status: "active" });
+    if (!property) return res.status(404).json({ error: "Not found" });
+    // Notify the property owner that they can log in
+    try {
+      const owners = await storage.getAllAdminUsers(property.id);
+      const owner = owners.find((u) => u.role === "owner") || owners[0];
+      if (owner) {
+        await emailService.sendRawEmail({
+          propertyId: property.id,
+          to: owner.email,
+          subject: `${property.name} is approved — log in to get started`,
+          html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h1 style="color:${property.primaryColor}">Welcome to Island Port Transfers</h1>
+            <p>Hi ${owner.username},</p>
+            <p>Your property <strong>${property.name}</strong> has been approved and is now live on the platform.</p>
+            <p>You can log in at <a href="${req.protocol}://${req.get("host")}/admin/login">your admin dashboard</a> using the username and password you registered with.</p>
+            <p>Your branded booking page: <a href="${req.protocol}://${req.get("host")}/?property=${property.slug}">${property.slug}</a></p>
+          </div>`,
+        });
+      }
+    } catch (err) {
+      console.error("Approval email failed:", err);
+    }
+    res.json(property);
+  });
+
+  // Reject (delete) a pending signup
+  app.post("/api/super-admin/properties/:id/reject", requireSuperAdmin, async (req, res) => {
+    const property = await storage.getProperty(req.params.id);
+    if (!property) return res.status(404).json({ error: "Not found" });
+    if (property.status !== "pending") return res.status(400).json({ error: "Only pending properties can be rejected" });
+    const ok = await storage.deleteProperty(req.params.id);
+    if (!ok) return res.status(400).json({ error: "Cannot reject" });
+    res.json({ success: true });
+  });
+
+  // ============================================================
+  // PUBLIC SIGN-UP — creates pending property + owner user
+  // ============================================================
+  const signupSchema = z.object({
+    propertyName: z.string().min(2).max(100),
+    slug: z.string().regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/, "Slug must be lowercase letters, numbers, and dashes").min(3).max(50),
+    contactEmail: z.string().email(),
+    primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#1e40af"),
+    ownerUsername: z.string().min(3).max(50).regex(/^[a-zA-Z0-9_-]+$/, "Username may contain letters, numbers, dashes, underscores"),
+    ownerEmail: z.string().email(),
+    ownerPassword: z.string().min(8, "Password must be at least 8 characters"),
+  });
+
+  const RESERVED_SLUGS = new Set([
+    "admin", "super-admin", "api", "www", "app", "mail", "marketing",
+    "signup", "login", "logout", "booking", "bookings", "settings",
+  ]);
+
+  app.post("/api/signup", async (req: Request, res: Response) => {
+    try {
+      const data = signupSchema.parse(req.body);
+      if (RESERVED_SLUGS.has(data.slug)) {
+        return res.status(400).json({ error: "That slug is reserved. Please pick another." });
+      }
+      // Uniqueness checks
+      const slugTaken = await storage.getPropertyBySlug(data.slug);
+      if (slugTaken) return res.status(400).json({ error: "That URL slug is already taken" });
+      const usernameTaken = await storage.getAdminUserByUsername(data.ownerUsername);
+      if (usernameTaken) return res.status(400).json({ error: "That username is already taken" });
+
+      // Hash password BEFORE provisioning (so a hashing failure can't leave orphans)
+      const hashed = await bcrypt.hash(data.ownerPassword, 10);
+
+      // Provision atomically: if anything fails (incl. unique-violation race), all rolled back
+      let property;
+      try {
+        property = await storage.createPropertyWithOwner({
+          property: {
+            slug: data.slug,
+            name: data.propertyName,
+            email: data.contactEmail,
+            primaryColor: data.primaryColor,
+            status: "pending",
+            plan: "starter",
+            isDefault: false,
+          },
+          owner: {
+            username: data.ownerUsername,
+            email: data.ownerEmail,
+            password: hashed,
+            role: "owner",
+          },
+        });
+      } catch (err: any) {
+        // Postgres unique violation
+        if (err?.code === "23505") {
+          const detail = String(err?.detail || "").toLowerCase();
+          if (detail.includes("slug")) return res.status(409).json({ error: "That URL slug is already taken" });
+          if (detail.includes("username")) return res.status(409).json({ error: "That username is already taken" });
+          return res.status(409).json({ error: "A conflicting account already exists" });
+        }
+        throw err;
+      }
+
+      // Seed defaults outside the transaction (best-effort: super-admin can re-seed if it fails)
+      try {
+        await seedPropertyDefaults(property.id);
+      } catch (err) {
+        console.error(`Default seed failed for property ${property.id}; can be re-seeded manually:`, err);
+      }
+
+      // Notify all super-admins (best effort)
+      try {
+        const supers = await storage.getAllSuperAdmins?.();
+        if (supers && supers.length) {
+          for (const sa of supers) {
+            await emailService.sendRawEmail({
+              propertyId: property.id,
+              to: sa.email,
+              subject: `New property signup pending: ${property.name}`,
+              html: `<div style="font-family: Arial, sans-serif;">
+                <h2>New property signup</h2>
+                <p><strong>${property.name}</strong> (slug: <code>${property.slug}</code>) is awaiting your approval.</p>
+                <p>Contact: ${property.email}</p>
+                <p>Owner: ${data.ownerUsername} &lt;${data.ownerEmail}&gt;</p>
+                <p><a href="${req.protocol}://${req.get("host")}/super-admin">Review in dashboard</a></p>
+              </div>`,
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Super-admin notification failed:", err);
+      }
+
+      res.json({ success: true, property: { id: property.id, name: property.name, slug: property.slug, status: property.status } });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ error: "Invalid data", details: err.errors });
+      console.error("Signup failed:", err);
+      res.status(500).json({ error: "Sign-up failed. Please try again." });
+    }
+  });
+
+  // Public slug availability check
+  app.get("/api/signup/slug-available", async (req: Request, res: Response) => {
+    const slug = String(req.query.slug || "").toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(slug) || slug.length < 3) {
+      return res.json({ available: false, reason: "invalid" });
+    }
+    if (RESERVED_SLUGS.has(slug)) return res.json({ available: false, reason: "reserved" });
+    const existing = await storage.getPropertyBySlug(slug);
+    res.json({ available: !existing });
+  });
+
   // ============================================================
   // PROPERTY USER AUTH (existing /api/admin/* preserved)
   // ============================================================

@@ -18,6 +18,7 @@ import AdminUsers from "@/pages/AdminUsers";
 import AdminPropertySettings from "@/pages/AdminPropertySettings";
 import SuperAdminLogin from "@/pages/SuperAdminLogin";
 import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
+import Signup from "@/pages/Signup";
 import BookingConfirmation from "@/pages/BookingConfirmation";
 import NotFound from "@/pages/not-found";
 import { useProperty } from "@/hooks/useProperty";
@@ -40,6 +41,8 @@ function Router() {
       <Route path="/admin/property" component={AdminPropertySettings} />
       <Route path="/super-admin/login" component={SuperAdminLogin} />
       <Route path="/super-admin/properties" component={SuperAdminDashboard} />
+      <Route path="/super-admin" component={SuperAdminDashboard} />
+      <Route path="/signup" component={Signup} />
       <Route path="/booking/confirmation" component={BookingConfirmation} />
       <Route component={NotFound} />
     </Switch>
