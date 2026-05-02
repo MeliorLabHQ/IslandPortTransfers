@@ -15,8 +15,12 @@ import AdminPricingRules from "@/pages/AdminPricingRules";
 import AdminSettings from "@/pages/AdminSettings";
 import AdminEmails from "@/pages/AdminEmails";
 import AdminUsers from "@/pages/AdminUsers";
+import AdminPropertySettings from "@/pages/AdminPropertySettings";
+import SuperAdminLogin from "@/pages/SuperAdminLogin";
+import SuperAdminDashboard from "@/pages/SuperAdminDashboard";
 import BookingConfirmation from "@/pages/BookingConfirmation";
 import NotFound from "@/pages/not-found";
+import { useProperty } from "@/hooks/useProperty";
 
 function Router() {
   return (
@@ -33,18 +37,29 @@ function Router() {
       <Route path="/admin/emails" component={AdminEmails} />
       <Route path="/admin/settings" component={AdminSettings} />
       <Route path="/admin/users" component={AdminUsers} />
+      <Route path="/admin/property" component={AdminPropertySettings} />
+      <Route path="/super-admin/login" component={SuperAdminLogin} />
+      <Route path="/super-admin/properties" component={SuperAdminDashboard} />
       <Route path="/booking/confirmation" component={BookingConfirmation} />
       <Route component={NotFound} />
     </Switch>
   );
 }
 
+function PropertyBrandingProvider({ children }: { children: React.ReactNode }) {
+  // Loads the active property and applies brand color/title as a side effect.
+  useProperty();
+  return <>{children}</>;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Toaster />
-        <Router />
+        <PropertyBrandingProvider>
+          <Toaster />
+          <Router />
+        </PropertyBrandingProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

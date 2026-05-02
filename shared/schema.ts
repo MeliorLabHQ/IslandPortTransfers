@@ -3,12 +3,61 @@ import { pgTable, text, varchar, timestamp, integer, decimal, boolean } from "dr
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Admin users
+// ============================================================================
+// MULTI-TENANCY: Properties (tenants) and Super Admins
+// ============================================================================
+
+// Properties (tenants) - each hotel/villa/STR business
+export const properties = pgTable("properties", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: text("slug").notNull().unique(), // used for subdomain routing
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  logoUrl: text("logo_url"),
+  primaryColor: text("primary_color").notNull().default("#1e40af"),
+  status: text("status").notNull().default("active"), // active, suspended
+  plan: text("plan").notNull().default("starter"), // starter, pro, business, enterprise
+  isDefault: boolean("is_default").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPropertySchema = createInsertSchema(properties).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertProperty = z.infer<typeof insertPropertySchema>;
+export type Property = typeof properties.$inferSelect;
+
+// Super admin users (platform admins - you)
+export const superAdminUsers = pgTable("super_admin_users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull().unique(),
+  password: text("password").notNull(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSuperAdminUserSchema = createInsertSchema(superAdminUsers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertSuperAdminUser = z.infer<typeof insertSuperAdminUserSchema>;
+export type SuperAdminUser = typeof superAdminUsers.$inferSelect;
+
+// ============================================================================
+// Property users (formerly admin_users) - staff at each property
+// Table name kept as admin_users to avoid disruption of existing sessions
+// ============================================================================
 export const adminUsers = pgTable("admin_users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   email: text("email").notNull(),
+  // Multi-tenancy fields (nullable during migration; backfilled by bootstrap)
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("owner"), // owner, staff
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -20,15 +69,20 @@ export const insertAdminUserSchema = createInsertSchema(adminUsers).omit({
 export type InsertAdminUser = z.infer<typeof insertAdminUserSchema>;
 export type AdminUser = typeof adminUsers.$inferSelect;
 
+// ============================================================================
+// Tenant-scoped tables (each has nullable propertyId during migration)
+// ============================================================================
+
 // Drivers
 export const drivers = pgTable("drivers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   email: text("email").notNull(),
   phone: text("phone").notNull(),
-  vehicleClass: text("vehicle_class").notNull(), // standard, luxury, minivan
-  vehicleDetails: text("vehicle_details"), // e.g., "Black Toyota Camry"
-  vehicleNumber: text("vehicle_number"), // License plate or vehicle number
+  vehicleClass: text("vehicle_class").notNull(),
+  vehicleDetails: text("vehicle_details"),
+  vehicleNumber: text("vehicle_number"),
   vehiclePhotoUrl: text("vehicle_photo_url"),
   driverPhotoUrl: text("driver_photo_url"),
   bankName: text("bank_name"),
@@ -46,9 +100,28 @@ export const insertDriverSchema = createInsertSchema(drivers).omit({
 export type InsertDriver = z.infer<typeof insertDriverSchema>;
 export type Driver = typeof drivers.$inferSelect;
 
+// Zones
+export const zones = pgTable("zones", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertZoneSchema = createInsertSchema(zones).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertZone = z.infer<typeof insertZoneSchema>;
+export type Zone = typeof zones.$inferSelect;
+
 // Hotels
 export const hotels = pgTable("hotels", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   address: text("address"),
   zone: text("zone"), // Legacy field - deprecated in favor of zoneId
@@ -65,26 +138,10 @@ export const insertHotelSchema = createInsertSchema(hotels).omit({
 export type InsertHotel = z.infer<typeof insertHotelSchema>;
 export type Hotel = typeof hotels.$inferSelect;
 
-// Zones
-export const zones = pgTable("zones", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull().unique(),
-  description: text("description"),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
-
-export const insertZoneSchema = createInsertSchema(zones).omit({
-  id: true,
-  createdAt: true,
-});
-
-export type InsertZone = z.infer<typeof insertZoneSchema>;
-export type Zone = typeof zones.$inferSelect;
-
 // Zone Routes (zone-to-zone pricing)
 export const zoneRoutes = pgTable("zone_routes", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
   originZoneId: varchar("origin_zone_id").notNull().references(() => zones.id, { onDelete: "cascade" }),
   destinationZoneId: varchar("destination_zone_id").notNull().references(() => zones.id, { onDelete: "cascade" }),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
@@ -103,8 +160,9 @@ export type ZoneRoute = typeof zoneRoutes.$inferSelect;
 // Rates (base rates by vehicle class and party size)
 export const rates = pgTable("rates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
   zoneId: varchar("zone_id").notNull().references(() => zones.id, { onDelete: "cascade" }),
-  vehicleClass: text("vehicle_class").notNull(), // standard, luxury, minivan
+  vehicleClass: text("vehicle_class").notNull(),
   minPartySize: integer("min_party_size").notNull(),
   maxPartySize: integer("max_party_size").notNull(),
   basePrice: decimal("base_price", { precision: 10, scale: 2 }).notNull(),
@@ -121,18 +179,19 @@ export const insertRateSchema = createInsertSchema(rates).omit({
 export type InsertRate = z.infer<typeof insertRateSchema>;
 export type Rate = typeof rates.$inferSelect;
 
-// Pricing rules (seasonal, time-based modifiers)
+// Pricing rules
 export const pricingRules = pgTable("pricing_rules", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
-  vehicleClass: text("vehicle_class"), // null means applies to all
-  zoneId: varchar("zone_id").references(() => zones.id, { onDelete: "cascade" }), // null means applies to all
+  vehicleClass: text("vehicle_class"),
+  zoneId: varchar("zone_id").references(() => zones.id, { onDelete: "cascade" }),
   multiplier: decimal("multiplier", { precision: 5, scale: 2 }).notNull().default("1.00"),
   fixedAmount: decimal("fixed_amount", { precision: 10, scale: 2 }).notNull().default("0.00"),
-  daysOfWeek: text("days_of_week").array(), // null or ['monday', 'tuesday', ...]
-  startTime: text("start_time"), // HH:mm format
-  endTime: text("end_time"), // HH:mm format
+  daysOfWeek: text("days_of_week").array(),
+  startTime: text("start_time"),
+  endTime: text("end_time"),
   startDate: timestamp("start_date"),
   endDate: timestamp("end_date"),
   isActive: boolean("is_active").notNull().default(true),
@@ -151,33 +210,22 @@ export type PricingRule = typeof pricingRules.$inferSelect;
 // Bookings
 export const bookings = pgTable("bookings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
   referenceNumber: text("reference_number").notNull().unique(),
-  
-  // Booking type: "hotel" or "destination"
   bookingType: text("booking_type").notNull().default("hotel"),
-  
-  // Customer info
   customerName: text("customer_name").notNull(),
   customerEmail: text("customer_email").notNull(),
   customerPhone: text("customer_phone").notNull(),
-  
-  // Booking details
   pickupLocation: text("pickup_location").notNull(),
   dropoffLocation: text("dropoff_location").notNull(),
   accommodation: text("accommodation"),
-  hotelId: varchar("hotel_id").references(() => hotels.id), // For hotel tab
-  destinationLink: text("destination_link"), // For destination link tab (Airbnb/Google Maps)
-  arrivalPortId: varchar("arrival_port_id"), // Port of arrival (airport/ferry terminal)
+  hotelId: varchar("hotel_id").references(() => hotels.id),
+  destinationLink: text("destination_link"),
+  arrivalPortId: varchar("arrival_port_id"),
   pickupDate: timestamp("pickup_date").notNull(),
   partySize: integer("party_size").notNull(),
-  
-  // Flight info
   flightNumber: text("flight_number").notNull(),
-  
-  // Vehicle
   vehicleClass: text("vehicle_class").notNull(),
-  
-  // Pricing
   bookingFee: decimal("booking_fee", { precision: 10, scale: 2 }),
   driverFee: decimal("driver_fee", { precision: 10, scale: 2 }),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }),
@@ -185,18 +233,10 @@ export const bookings = pgTable("bookings", {
   pricingSet: boolean("pricing_set").notNull().default(false),
   paymentLinkSent: boolean("payment_link_sent").notNull().default(false),
   paymentLinkSentAt: timestamp("payment_link_sent_at"),
-  
-  // Stripe
   stripeSessionId: text("stripe_session_id"),
-  
-  // Status
-  status: text("status").notNull().default("new"), // new, paid_fee, driver_assigned, completed, canceled
-  
-  // Driver assignment
+  status: text("status").notNull().default("new"),
   driverId: varchar("driver_id").references(() => drivers.id),
   assignedAt: timestamp("assigned_at"),
-  
-  // Timestamps
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -206,6 +246,7 @@ export const insertBookingSchema = createInsertSchema(bookings).omit({
   createdAt: true,
   updatedAt: true,
 }).partial({
+  propertyId: true,
   referenceNumber: true,
   bookingType: true,
   hotelId: true,
@@ -228,11 +269,11 @@ export const insertBookingSchema = createInsertSchema(bookings).omit({
 export type InsertBooking = z.infer<typeof insertBookingSchema>;
 export type Booking = typeof bookings.$inferSelect;
 
-// Ports (airports and ferry terminals)
+// Ports (airports and ferry terminals) - GLOBAL, shared across all properties
 export const ports = pgTable("ports", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
-  code: text("code").notNull().unique(), // UVF, SLU, PORT_CASTRIES
+  code: text("code").notNull().unique(),
   description: text("description"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -246,9 +287,10 @@ export const insertPortSchema = createInsertSchema(ports).omit({
 export type InsertPort = z.infer<typeof insertPortSchema>;
 export type Port = typeof ports.$inferSelect;
 
-// Port to Hotel Rates
+// Port to Hotel Rates (per property because hotels are per property)
 export const portHotelRates = pgTable("port_hotel_rates", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
   portId: varchar("port_id").notNull().references(() => ports.id, { onDelete: "cascade" }),
   hotelId: varchar("hotel_id").notNull().references(() => hotels.id, { onDelete: "cascade" }),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
@@ -264,10 +306,13 @@ export const insertPortHotelRateSchema = createInsertSchema(portHotelRates).omit
 export type InsertPortHotelRate = z.infer<typeof insertPortHotelRateSchema>;
 export type PortHotelRate = typeof portHotelRates.$inferSelect;
 
-// Settings (configurable values)
+// Settings (per-property configuration: tax %, surcharge, stripe env, etc.)
+// Uniqueness is now enforced as (propertyId, key) at app level since one property
+// can have its own tax_percentage, large_party_surcharge, etc.
 export const settings = pgTable("settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  key: text("key").notNull().unique(),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
   value: text("value").notNull(),
   description: text("description"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -281,7 +326,30 @@ export const insertSettingSchema = createInsertSchema(settings).omit({
 export type InsertSetting = z.infer<typeof insertSettingSchema>;
 export type Setting = typeof settings.$inferSelect;
 
-// Keep legacy users table for backward compatibility
+// Email Templates (per-property branded emails)
+export const emailTemplates = pgTable("email_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  propertyId: varchar("property_id").references(() => properties.id, { onDelete: "cascade" }),
+  templateKey: text("template_key").notNull(),
+  name: text("name").notNull(),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+  triggerDescription: text("trigger_description").notNull(),
+  recipientType: text("recipient_type").notNull(),
+  availableVariables: text("available_variables").array().notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
+export type EmailTemplate = typeof emailTemplates.$inferSelect;
+
+// Legacy users table (kept for backward compatibility)
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
@@ -295,25 +363,3 @@ export const insertUserSchema = createInsertSchema(users).pick({
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
-
-// Email Templates
-export const emailTemplates = pgTable("email_templates", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  templateKey: text("template_key").notNull().unique(), // booking_confirmation, quote_notification, etc.
-  name: text("name").notNull(), // Human-readable name
-  subject: text("subject").notNull(),
-  body: text("body").notNull(), // HTML content with placeholders
-  triggerDescription: text("trigger_description").notNull(),
-  recipientType: text("recipient_type").notNull(), // customer, driver, admin
-  availableVariables: text("available_variables").array().notNull(), // List of placeholder variables
-  isActive: boolean("is_active").notNull().default(true),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
-
-export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
-  id: true,
-  updatedAt: true,
-});
-
-export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
-export type EmailTemplate = typeof emailTemplates.$inferSelect;

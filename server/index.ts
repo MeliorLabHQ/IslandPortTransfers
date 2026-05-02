@@ -4,6 +4,10 @@ import { setupVite, serveStatic, log } from "./vite";
 import { runMigrations } from 'stripe-replit-sync';
 import { getStripeSync } from './stripeClient';
 import { WebhookHandlers } from './webhookHandlers';
+import { applyMultiTenantSchema } from './migrations/0001_multi_tenant';
+import { bootstrapMultiTenant } from './multiTenantBootstrap';
+import { seedPropertyDefaults } from './propertyDefaults';
+import { storage } from './storage';
 
 const app = express();
 
@@ -127,6 +131,16 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Multi-tenant: ensure schema, default property, super admin, and per-property defaults
+  try {
+    await applyMultiTenantSchema();
+    await bootstrapMultiTenant();
+    const defaultProp = await storage.getDefaultProperty();
+    if (defaultProp) await seedPropertyDefaults(defaultProp.id);
+  } catch (err) {
+    console.error('Multi-tenant bootstrap failed:', err);
+  }
+
   await initStripe();
   const server = await registerRoutes(app);
 

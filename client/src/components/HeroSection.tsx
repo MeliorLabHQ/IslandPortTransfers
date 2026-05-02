@@ -31,10 +31,12 @@ import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import heroImage from "@assets/30189_1773942664009.jpg";
 import type { Hotel, Port } from "@shared/schema";
+import { useProperty } from "@/hooks/useProperty";
 
 export default function HeroSection() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { property } = useProperty();
   const [activeTab, setActiveTab] = useState("hotel");
   const [currentStep, setCurrentStep] = useState(1);
   
@@ -301,8 +303,16 @@ export default function HeroSection() {
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           <div className="text-white">
             <div className="mb-6">
-              <h1 className="text-3xl lg:text-5xl font-heading font-semibold mb-4 leading-tight">
-                Premium Airport Transfers in St. Lucia
+              {property?.logoUrl && (
+                <img
+                  src={property.logoUrl}
+                  alt={`${property.name} logo`}
+                  className="h-16 mb-6 object-contain"
+                  data-testid="img-property-logo"
+                />
+              )}
+              <h1 className="text-3xl lg:text-5xl font-heading font-semibold mb-4 leading-tight" data-testid="text-hero-title">
+                {property?.name ? `Premium Transfers for ${property.name}` : "Premium Airport Transfers in St. Lucia"}
               </h1>
               <p className="text-lg text-white/80">
                 Book your comfortable ride from the airport to your destination in under 60 seconds.
@@ -532,6 +542,7 @@ export default function HeroSection() {
                     <Button
                       data-testid="button-next-step1"
                       className="w-full h-12 text-base font-semibold"
+                      style={property?.primaryColor ? { backgroundColor: property.primaryColor, borderColor: property.primaryColor } : undefined}
                       onClick={handleNext}
                     >
                       Continue

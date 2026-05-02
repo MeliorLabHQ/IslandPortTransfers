@@ -7,12 +7,25 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+function getPropertySlug(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("property");
+}
+
+function withPropertySlug(url: string): string {
+  const slug = getPropertySlug();
+  if (!slug) return url;
+  if (!url.startsWith("/api/")) return url;
+  if (url.includes("property=")) return url;
+  return url + (url.includes("?") ? "&" : "?") + "property=" + encodeURIComponent(slug);
+}
+
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const res = await fetch(url, {
+  const res = await fetch(withPropertySlug(url), {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
@@ -49,7 +62,7 @@ export const getQueryFn: <T>(options: {
       }
     }
     
-    const res = await fetch(url, {
+    const res = await fetch(withPropertySlug(url), {
       credentials: "include",
     });
 

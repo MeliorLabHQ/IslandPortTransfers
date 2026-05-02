@@ -1,8 +1,28 @@
-# AirTransfer - Airport Transfer Booking Service
+# AirTransfer - Airport Transfer Booking Service (Multi-Tenant)
 
 ## Overview
 
-AirTransfer is a premium airport transfer booking platform that enables customers to book airport transportation services through a streamlined, multi-step booking form. The application features a public-facing landing page with vehicle fleet information and an admin dashboard for managing bookings, drivers, zones, rates, and pricing rules.
+AirTransfer (Island Port Transfers) is a premium airport-transfer booking platform for St. Lucia. As of Phase 1 of the B2B transformation, it is a **white-label multi-tenant platform**: each "Property" (hotel/villa/resort) gets a branded booking page, isolated data (hotels, rates, bookings, drivers, settings, email templates), and its own owner+staff admin users. A super-admin manages all properties from a dedicated dashboard.
+
+## Multi-Tenancy
+
+**Tenant model:** `properties` table is the tenant. Every tenant-scoped table (admin_users, drivers, hotels, zones, zone_routes, rates, pricing_rules, bookings, port_hotel_rates, settings, email_templates) carries a `propertyId` foreign key.
+
+**Default property:** "Island Port Transfers" (slug `island-port-transfers`, email `info@islandporttransfers.com`, isDefault=true) — created by bootstrap on first run; legacy data backfilled to it.
+
+**Super-admin:** `jesus@meliorlab.tech` / `testing123` (bcrypt-seeded by bootstrap). Can list, create, update, delete properties via `/super-admin` UI; deletion of default property is blocked. New properties get seeded default settings + email templates but NO hotels/rates.
+
+**Tenant resolution (server):** `server/tenantMiddleware.ts` `attachProperty` middleware resolves the active property from (in order): `?property=<slug>` query, `X-Property-Slug` header, subdomain (production), or falls back to default property. Mounted on all public booking endpoints.
+
+**Tenant resolution (client):** `client/src/lib/queryClient.ts` automatically injects `?property=<slug>` from the current URL into every `/api/*` request, so all TanStack Query reads + apiRequest mutations are tenant-scoped without per-call changes. `client/src/hooks/useProperty.ts` fetches `/api/property` and applies `--brand-color` CSS variable + document title.
+
+**Auth/session shape:** `{ userType: 'super_admin' | 'property_user', userId, propertyId? }`. Legacy `adminId`/`isAdmin` fields kept for backward compat in `/api/admin/login`. Middleware: `requireSuperAdmin`, `requirePropertyUser` (the latter sets `req.property` from session.propertyId).
+
+**Bootstrap:** `server/migrations/0001_multi_tenant.ts` (idempotent ALTER+ADD COLUMN IF NOT EXISTS, drops legacy global unique constraints on settings.key/zones.name/email_templates.template_key) and `server/multiTenantBootstrap.ts` (idempotent default property + super-admin + backfills) both run on startup from `server/index.ts`.
+
+**Property branding:** `propertyId`, `slug`, `name`, `logoUrl` (nullable), `primaryColor` (hex), `email`, `status`, `plan`, `isDefault`. New properties show a generic taxi logo (logoUrl null → frontend falls back). Branded HeroSection shows `Premium Transfers for {{propertyName}}` and uses `primaryColor` for the primary CTA. Property owners can edit branding from `/admin/property` (AdminPropertySettings).
+
+**Stripe + Email:** Webhook reads `metadata.propertyId` from Stripe sessions/payment links and routes events to the correct tenant. `server/emailService.ts` requires `propertyId`, loads per-property email templates (with hardcoded fallback), and uses property `email` as the from-name.
 
 The platform emphasizes conversion-focused design with professional imagery, transparent pricing, and a simplified booking experience inspired by leading travel and transportation services.
 

@@ -1,0 +1,60 @@
+1. What do we call the tenant? - Property
+2. What do we call your existing single-tenant brand after migration? - Island Port Transfers
+3. Should the existing landing page (airtransfer.com) stay as a marketing site, or stay as a working booking page for the default property? - Option A: Marketing site at root, properties get subdomains
+4. Initial roles for property users. - owner and staff for now
+
+---
+
+1. **Do you own a domain yet?** (e.g., `airtransfer.com` or whatever your brand domain is) - Yes, islandporttransfers.com
+2. **Where is DNS hosted?** (Cloudflare, GoDaddy, Namecheap, etc.) - GoDaddy
+3. **Replit deployment plan.**
+    - Subdomain wildcard support requires a **custom domain on a Replit deployment**. The free `.replit.app` URL won't support `.yoursubdomain.replit.app`. You'll need to publish the app and connect your custom domain.
+
+> **Workaround for development:** During Phase 1 dev work, I can simulate subdomains using a query param (`?property=sandals`) or a header so we don't have to wait on DNS. We'd switch to real subdomains before launch.
+> 
+
+---
+
+For your default/existing property:
+
+- **Logo** (PNG or SVG, ideally a transparent version)
+- **Brand color** (hex code for primary; secondary is optional)
+- The current hero image (already in place — we can keep it)
+
+For setting up the **starter template** new properties get:
+
+- A **placeholder logo** (we can generate a generic one) - use a generic taxi logo for now
+- A **default brand color** (we can pick blue/grey if you don't have a preference)
+- A list of **default destinations to seed** for St. Lucia (UVF, GFL, Pigeon Island, Sulphur Springs, Diamond Falls, etc.) — or I can propose a list and you approve it. - You can use the current list of hotel destinations for this.
+
+---
+
+4. Data Migration Inputs
+
+Your existing data needs to be moved into the new "default property":
+
+- **Existing bookings**, **drivers**, **hotels**, **zones**, **rates**, **email templates** all currently belong to nobody. After migration they'll all belong to the default property.
+- **Existing admin users** become property owners of the default property.
+- **You** will become the **first super-admin** (separate role above all properties).
+
+A few questions:
+
+1. **Who is the first super-admin?** Your email + a password (or do you want me to use one of the existing admin accounts and elevate it)? - use this as the super admin account - email: [jesus@meliorlab.tech](mailto:jesus@meliorlab.tech), password: testing123
+2. **What email should the default property be linked to?** (used for billing/notifications later) - info@islandporttransfers.com
+3. **Do you want to keep your current admin panel exactly as-is** (just scoped to one property) **or take this chance to redesign anything? - Keep as is for now.**
+
+---
+
+5. Technical Decisions I'll Make Unless You Object
+
+To keep momentum, I'll default these unless you tell me otherwise:
+
+| **Decision** | **Default** |
+| --- | --- |
+| Tenant scoping approach | `propertyId` foreign key on every tenant table, enforced via middleware |
+| Migration strategy | Backfill script that creates default property and assigns all existing rows to it |
+| Subdomain dev workaround | Query parameter (`?property=slug`) until DNS is ready |
+| Property slug rules | lowercase, alphanumeric + hyphens, 3–30 chars (e.g., `sandals-grande`) |
+| Login flow | Property users log in at `app.airtransfer.com/login` (or root subdomain), get redirected to their property's dashboard. Super-admins log in at `admin.airtransfer.com/login`. |
+| Branding storage | Logo URL stored on the `properties` table, brand color as hex string, applied via CSS variables at runtime |
+| Plan/tier field | Add the column now (default `starter`), but don't enforce limits until Phase 4 |

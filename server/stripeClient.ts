@@ -5,9 +5,12 @@ export type StripeEnvironment = 'sandbox' | 'live';
 
 async function resolveEnvironment(): Promise<StripeEnvironment> {
   try {
-    const setting = await storage.getSetting('stripe_environment');
-    if (setting?.value === 'live' || setting?.value === 'sandbox') {
-      return setting.value as StripeEnvironment;
+    const defaultProp = await storage.getDefaultProperty();
+    if (defaultProp) {
+      const setting = await storage.getSetting('stripe_environment', defaultProp.id);
+      if (setting?.value === 'live' || setting?.value === 'sandbox') {
+        return setting.value as StripeEnvironment;
+      }
     }
   } catch {
     // fall through to default

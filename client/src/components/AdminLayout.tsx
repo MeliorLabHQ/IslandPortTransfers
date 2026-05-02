@@ -24,6 +24,7 @@ import {
   Settings,
   Mail,
   UserCog,
+  Palette,
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -37,6 +38,7 @@ const menuItems = [
   { title: "Pricing Rules", url: "/admin/pricing-rules", icon: Tag },
   { title: "Emails", url: "/admin/emails", icon: Mail },
   { title: "Settings", url: "/admin/settings", icon: Settings },
+  { title: "Property", url: "/admin/property", icon: Palette },
   { title: "Admin Users", url: "/admin/users", icon: UserCog },
 ];
 
@@ -44,7 +46,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
 
-  const { data: admin, isLoading } = useQuery<{ id: string; username: string; email: string }>({
+  const { data: admin, isLoading } = useQuery<{ id: string; username: string; email: string; role?: string; property?: { id: string; name: string; slug: string; logoUrl: string | null; primaryColor: string } }>({
     queryKey: ["/api/admin/me"],
     retry: false,
   });
@@ -87,7 +89,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <Sidebar>
           <SidebarContent>
             <SidebarGroup>
-              <SidebarGroupLabel className="text-lg font-heading font-semibold px-4 py-3">IslandPortTransfers</SidebarGroupLabel>
+              <SidebarGroupLabel className="text-lg font-heading font-semibold px-4 py-3" data-testid="text-property-name">
+                {admin?.property?.name || "Admin"}
+              </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   {menuItems.map((item) => (
